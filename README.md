@@ -10,7 +10,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-打开 <http://localhost:3000>。
+打开 <http://localhost:17842>。
 
 如果目录路径或 Compose 版本导致项目名无法自动推断，可以显式指定：
 
