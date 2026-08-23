@@ -23,12 +23,29 @@ def validate_runtime_config() -> None:
         raise RuntimeError("SESSION_SECRET must contain at least 32 characters")
 
 
-def _password_digest(password: str) -> bytes:
-    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), SESSION_SECRET.encode("utf-8"), 210_000)
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 210_000)
+    return f"pbkdf2_sha256$210000${salt.hex()}${digest.hex()}"
 
 
-def check_password(username: str, password: str) -> bool:
-    return hmac.compare_digest(username, ADMIN_USERNAME) and hmac.compare_digest(_password_digest(password), _password_digest(ADMIN_PASSWORD))
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        algorithm, rounds_raw, salt_hex, digest_hex = encoded.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(rounds_raw))
+        return hmac.compare_digest(digest.hex(), digest_hex)
+    except (ValueError, TypeError):
+        return False
+
+
+def check_password(username: str, password: str, stored_hash: str | None = None) -> bool:
+    if not hmac.compare_digest(username, ADMIN_USERNAME):
+        return False
+    if stored_hash:
+        return verify_password(password, stored_hash)
+    return hmac.compare_digest(password, ADMIN_PASSWORD)
 
 
 def _client_attempts(client_id: str) -> deque[float]:

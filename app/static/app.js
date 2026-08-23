@@ -7,14 +7,16 @@ const api = async (url, options = {}) => {
   const response = await fetch(url, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) { authenticated = false; showLogin(); }
+  if (response.status === 428) showChangePassword();
   if (!response.ok) throw new Error(data.detail || data.message || `请求失败（${response.status}）`);
   return data;
 };
 const toast = (message, error = false) => { const el = $('#toast'); el.textContent = message; el.classList.toggle('error', error); el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2800); };
 const fmtTime = (value) => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
 const money = (value) => value == null ? '—' : Number(value).toFixed(2);
-const showLogin = () => { $('#authGate').classList.add('visible'); setTimeout(() => $('#loginPassword').focus(), 80); };
-const hideLogin = () => { $('#authGate').classList.remove('visible'); $('#loginPassword').value = ''; $('#loginHint').textContent = ''; };
+const showLogin = () => { $('#authGate').classList.remove('change-mode'); $('#authGate').classList.add('visible'); setTimeout(() => $('#loginPassword').focus(), 80); };
+const showChangePassword = () => { $('#authGate').classList.add('change-mode', 'visible'); setTimeout(() => $('#currentPassword').focus(), 80); };
+const hideLogin = () => { $('#authGate').classList.remove('visible', 'change-mode'); $('#loginPassword').value = ''; $('#loginHint').textContent = ''; };
 
 async function loadDashboard() {
   const data = await api('/api/dashboard');
@@ -64,8 +66,14 @@ $('#loginForm').addEventListener('submit', async (event) => {
     const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: $('#loginUsername').value, password: $('#loginPassword').value }) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.detail || '登录失败');
-    authenticated = true; hideLogin(); toast('登录成功'); await reload();
+    authenticated = true; if (data.must_change_password) showChangePassword(); else { hideLogin(); toast('登录成功'); await reload(); }
   } catch (error) { hint.textContent = error.message; hint.classList.add('error'); }
+});
+$('#changePasswordForm').addEventListener('submit', async (event) => {
+  event.preventDefault(); const hint = $('#changePasswordHint'); const current = $('#currentPassword').value; const next = $('#newPassword').value; const confirmNext = $('#confirmPassword').value;
+  if (next !== confirmNext) { hint.textContent = '两次输入的新密码不一致'; return; }
+  if (next.length < 12) { hint.textContent = '新密码至少需要 12 位'; return; }
+  try { await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }) }); hideLogin(); toast('密码已修改'); await reload(); } catch (error) { hint.textContent = error.message; }
 });
 $('#exportBtn').addEventListener('click', async () => {
   try {
@@ -120,7 +128,7 @@ $('#siteGrid').addEventListener('click', async (event) => {
 });
 
 async function bootstrap() {
-  try { const status = await fetch('/api/auth/status').then((response) => response.json()); authenticated = status.authenticated === true; if (authenticated) await reload(); else showLogin(); } catch { showLogin(); }
+  try { const status = await fetch('/api/auth/status').then((response) => response.json()); authenticated = status.authenticated === true; if (authenticated && status.must_change_password) showChangePassword(); else if (authenticated) await reload(); else showLogin(); } catch { showLogin(); }
 }
 bootstrap();
 setInterval(() => { if (authenticated) { loadDashboard().catch(() => {}); loadLogs().catch(() => {}); } }, 60000);

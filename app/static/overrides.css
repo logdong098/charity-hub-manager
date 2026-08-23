@@ -87,6 +87,9 @@ body {
 .auth-gate { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; padding: 20px; background: rgba(20, 48, 41, .48); backdrop-filter: blur(12px); }
 .auth-gate.visible { display: grid; }
 .login-card { width: min(390px, 100%); padding: 36px; border: 1px solid rgba(255,255,255,.75); border-radius: 26px; background: rgba(255,255,255,.96); box-shadow: 0 26px 80px rgba(10, 39, 30, .28); }
+.password-change-card { display: none; }
+.auth-gate.change-mode .login-card { display: none; }
+.auth-gate.change-mode .password-change-card { display: block; }
 .login-logo { width: 52px; height: 52px; display: grid; place-items: center; margin-bottom: 22px; border-radius: 17px; color: var(--green-deep); background: var(--green-soft); font-size: 26px; }
 .login-card h2 { margin: 0 0 8px; font-size: 27px; letter-spacing: -1px; }
 .login-card .muted { margin: 0 0 26px; }

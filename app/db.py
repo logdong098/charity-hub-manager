@@ -94,6 +94,7 @@ def init_db() -> None:
             "checkin_time": os.getenv("CHECKIN_TIME", "02:00"),
             "last_scheduler_run": "",
             "last_scheduler_day": "",
+            "admin_password_hash": "",
         }
         for key, value in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))

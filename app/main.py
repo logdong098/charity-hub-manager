@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, field_validator
 from .crypto import decrypt, encrypt, fingerprint
 from .db import connection, init_db, row_dict, rows_dict
 from .new_api import NewAPIAdapter, _looks_like_cookie, normalize_url
-from .auth import COOKIE_NAME, ADMIN_USERNAME, check_password, clear_failed_logins, create_session, login_allowed, record_failed_login, validate_runtime_config, verify_session
+from .auth import COOKIE_NAME, ADMIN_USERNAME, check_password, clear_failed_logins, create_session, hash_password, login_allowed, record_failed_login, validate_runtime_config, verify_session
 
 
 ROOT = os.path.dirname(__file__)
@@ -91,11 +91,22 @@ class LoginIn(BaseModel):
     password: str = Field(min_length=1, max_length=500)
 
 
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=500)
+    new_password: str = Field(min_length=12, max_length=500)
+
+
 def site_view(row: dict[str, Any]) -> dict[str, Any]:
     row["account_count"] = int(row.get("account_count") or 0)
     row["healthy_count"] = int(row.get("healthy_count") or 0)
     row["last_probe_ok"] = None if row.get("last_probe_ok") is None else bool(row["last_probe_ok"])
     return row
+
+
+def stored_admin_password_hash() -> str:
+    with connection() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'admin_password_hash'").fetchone()
+    return str(row["value"]) if row and row["value"] else ""
 
 
 def _backup_root(data: dict[str, Any]) -> dict[str, Any]:
@@ -294,8 +305,11 @@ app.mount("/static", StaticFiles(directory=os.path.join(ROOT, "static")), name="
 async def protect_management_api(request: Request, call_next):
     path = request.url.path
     public_api = {"/api/health", "/api/auth/login", "/api/auth/status", "/api/auth/logout"}
-    if path.startswith("/api/") and path not in public_api and not verify_session(request.cookies.get(COOKIE_NAME)):
+    authenticated = verify_session(request.cookies.get(COOKIE_NAME))
+    if path.startswith("/api/") and path not in public_api and not authenticated:
         return JSONResponse(status_code=401, content={"detail": "请先登录管理面板"})
+    if path.startswith("/api/") and authenticated and not stored_admin_password_hash() and path not in {"/api/auth/change-password", "/api/auth/logout", "/api/auth/status"}:
+        return JSONResponse(status_code=428, content={"detail": "首次登录必须先修改管理密码"})
     return await call_next(request)
 
 
@@ -312,7 +326,7 @@ async def health() -> dict[str, str]:
 @app.get("/api/auth/status")
 async def auth_status(request: Request) -> dict[str, Any]:
     authenticated = verify_session(request.cookies.get(COOKIE_NAME))
-    return {"authenticated": authenticated, "username": ADMIN_USERNAME if authenticated else None}
+    return {"authenticated": authenticated, "username": ADMIN_USERNAME if authenticated else None, "must_change_password": authenticated and not stored_admin_password_hash()}
 
 
 @app.post("/api/auth/login")
@@ -320,11 +334,11 @@ async def auth_login(payload: LoginIn, request: Request) -> JSONResponse:
     client_id = request.client.host if request.client else "unknown"
     if not login_allowed(client_id):
         raise HTTPException(429, "登录失败次数过多，请 10 分钟后重试")
-    if not check_password(payload.username, payload.password):
+    if not check_password(payload.username, payload.password, stored_admin_password_hash() or None):
         record_failed_login(client_id)
         raise HTTPException(401, "用户名或密码错误")
     clear_failed_logins(client_id)
-    response = JSONResponse({"authenticated": True, "username": ADMIN_USERNAME})
+    response = JSONResponse({"authenticated": True, "username": ADMIN_USERNAME, "must_change_password": not stored_admin_password_hash()})
     response.set_cookie(COOKIE_NAME, create_session(ADMIN_USERNAME), max_age=7 * 24 * 60 * 60, httponly=True, samesite="lax", secure=os.getenv("COOKIE_SECURE", "false").lower() == "true", path="/")
     return response
 
@@ -334,6 +348,19 @@ async def auth_logout() -> JSONResponse:
     response = JSONResponse({"authenticated": False})
     response.delete_cookie(COOKIE_NAME, path="/")
     return response
+
+
+@app.post("/api/auth/change-password")
+async def auth_change_password(payload: ChangePasswordIn, request: Request) -> JSONResponse:
+    if not verify_session(request.cookies.get(COOKIE_NAME)):
+        raise HTTPException(401, "请先登录")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(422, "新密码不能与当前密码相同")
+    if not check_password(ADMIN_USERNAME, payload.current_password, stored_admin_password_hash() or None):
+        raise HTTPException(401, "当前密码错误")
+    with connection() as conn:
+        conn.execute("INSERT INTO settings(key, value) VALUES('admin_password_hash', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (hash_password(payload.new_password),))
+    return JSONResponse({"ok": True, "message": "管理密码已修改"})
 
 
 @app.get("/api/dashboard")
