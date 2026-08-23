@@ -1,0 +1,21 @@
+name: charity-hub
+
+services:
+  charity-hub:
+    build: .
+    container_name: charity-hub
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:8080"
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      DATABASE_PATH: /data/charity-hub.db
+      CREDENTIAL_KEY: ${CREDENTIAL_KEY:?请在 .env 中设置一个 32 字节以上的随机密钥}
+      CHECKIN_ENABLED: ${CHECKIN_ENABLED:-true}
+      CHECKIN_TIME: ${CHECKIN_TIME:-02:00}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-20}
+    volumes:
+      - charity_hub_data:/data
+
+volumes:
+  charity_hub_data:

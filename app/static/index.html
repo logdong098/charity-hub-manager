@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>公益站 · Charity Hub</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/overrides.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">✦</span><span>Charity Hub</span></div>
+        <p class="tagline">公益站统一管理台</p>
+        <nav>
+          <a class="nav-item active" href="#dashboard"><span>▦</span>站点总览</a>
+          <a class="nav-item" href="#logs"><span>◷</span>签到记录</a>
+          <a class="nav-item" href="#settings"><span>⚙</span>自动化设置</a>
+        </nav>
+        <div class="sidebar-foot"><span class="pulse"></span><span>调度器运行中</span></div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div><p class="eyebrow">CONTROL CENTER / 01</p><h1>公益站总览</h1></div>
+          <div class="top-actions"><button class="btn ghost" id="refreshBtn">↻ 刷新</button><button class="btn ghost" id="exportBtn">↓ 导出配置</button><button class="btn ghost" id="importBtn">↑ 导入 JSON</button><button class="btn primary" id="addSiteBtn">＋ 添加站点</button></div>
+        </header>
+
+        <section class="hero-grid" id="dashboard">
+          <div class="hero-copy"><p class="eyebrow warm">GOOD THINGS, ON SCHEDULE</p><h2>把每一个签到，<br /><em>变成稳定的日常。</em></h2><p class="muted">集中查看所有公益站的余额、账号状态与每日签到结果。</p></div>
+          <div class="stats-grid">
+            <div class="stat-card"><span>站点</span><strong id="statSites">—</strong><small>已接入平台</small></div>
+            <div class="stat-card"><span>账号</span><strong id="statAccounts">—</strong><small>活跃 <b id="statActive">—</b></small></div>
+            <div class="stat-card accent"><span>今日成功</span><strong id="statChecked">—</strong><small>签到记录</small></div>
+            <div class="stat-card danger"><span>今日失败</span><strong id="statFailures">—</strong><small>需要关注</small></div>
+          </div>
+        </section>
+
+        <section class="section-head"><div><p class="eyebrow">YOUR NETWORK</p><h2>站点与账号</h2></div><button class="btn outline" id="checkinAllBtn">⚡ 立即签到全部</button></section>
+        <section class="site-grid" id="siteGrid"><div class="empty loading">正在加载站点…</div></section>
+
+        <section class="lower-grid" id="logs">
+          <div class="panel"><div class="panel-head"><div><p class="eyebrow">ACTIVITY</p><h2>最近签到</h2></div><span class="live-dot">LIVE</span></div><div class="log-list" id="logList"></div></div>
+          <div class="panel" id="settings"><div class="panel-head"><div><p class="eyebrow">AUTOMATION</p><h2>自动化设置</h2></div><span class="schedule-state" id="scheduleState">—</span></div><form id="scheduleForm" class="schedule-form"><label class="switch-row"><span><b>启用自动签到</b><small>每天在设定时间执行一次</small></span><input type="checkbox" id="scheduleEnabled" /><i class="switch"></i></label><label>每日签到时间<input type="time" id="scheduleTime" required /></label><button class="btn primary" type="submit">保存设置</button><p class="muted tiny">默认凌晨 2:00，按 Docker Compose 中的 TZ 配置执行。</p></form></div>
+        </section>
+        <footer>Charity Hub · self-hosted · <a href="https://github.com/NotoChen/BalanceHub" target="_blank">BalanceHub architecture</a> inspired</footer>
+      </main>
+    </div>
+
+    <dialog id="siteDialog"><form method="dialog" class="dialog-form" id="siteForm"><div class="dialog-head"><div><p class="eyebrow">NEW CONNECTION</p><h2>添加公益站</h2></div><button class="close" value="cancel">×</button></div><label>站点名称<input required name="name" placeholder="例如：星辰公益站" /></label><label>站点地址<input required name="url" type="url" placeholder="https://example.com" /></label><label>平台<select name="platform"><option value="new-api">New API / 兼容 Fork</option><option value="one-api">One API 兼容</option></select></label><label>备注<textarea name="note" rows="2" placeholder="可选"></textarea></label><div class="dialog-actions"><button type="button" class="btn outline" id="probeBtn">先测试连接</button><button class="btn primary" value="default">保存站点</button></div><p class="form-hint" id="siteHint"></p></form></dialog>
+    <dialog id="accountDialog"><form method="dialog" class="dialog-form" id="accountForm"><div class="dialog-head"><div><p class="eyebrow">ACCOUNT ACCESS</p><h2>添加账号</h2><p class="muted" id="accountSiteName"></p></div><button class="close" value="cancel">×</button></div><input type="hidden" name="site_id" /><label>用户名 / 邮箱<input name="username" placeholder="登录用户名（Token 模式也建议填写）" /></label><label>凭据类型<select name="credential_type" id="credentialType"><option value="token">Access Token</option><option value="cookie">Cookie / Session</option><option value="password">用户名 + 密码（登录换取 Token）</option></select></label><label id="credentialLabel">Access Token<textarea required name="credential" rows="4" placeholder="不会在页面回显，服务端加密保存"></textarea></label><label>New-API 用户 ID（可选）<input name="platform_user_id" type="number" min="1" placeholder="仅部分站点需要" /></label><label class="switch-row compact"><span><b>启用自动签到</b></span><input type="checkbox" name="checkin_enabled" checked /><i class="switch"></i></label><div class="dialog-actions"><button class="btn primary" value="default">保存账号</button></div><p class="form-hint" id="accountHint"></p></form></dialog>
+    <dialog id="configDialog"><div class="dialog-form"><div class="dialog-head"><div><p class="eyebrow">BACKUP / RESTORE</p><h2>导入配置 JSON</h2><p class="muted">支持 Charity Hub 导出格式和 metapi 导出格式。当前文件只会预览，不会自动导入。</p></div><button class="close" id="closeConfigBtn">×</button></div><label>选择 JSON 文件<input type="file" id="configFile" accept="application/json,.json" /></label><div class="import-preview" id="importPreview">请选择文件后查看导入预览。</div><div class="dialog-actions"><button class="btn outline" id="previewImportBtn" disabled>解析预览</button><button class="btn primary" id="confirmImportBtn" disabled>确认导入</button></div><p class="form-hint" id="configHint"></p></div></dialog>
+    <div class="toast" id="toast"></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
