@@ -1,16 +1,20 @@
 const $ = (selector) => document.querySelector(selector);
 const state = { sites: [], accounts: new Map(), pendingImport: null };
+let authenticated = false;
 
 const esc = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const api = async (url, options = {}) => {
   const response = await fetch(url, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401) { authenticated = false; showLogin(); }
   if (!response.ok) throw new Error(data.detail || data.message || `请求失败（${response.status}）`);
   return data;
 };
 const toast = (message, error = false) => { const el = $('#toast'); el.textContent = message; el.classList.toggle('error', error); el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2800); };
 const fmtTime = (value) => value ? new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
 const money = (value) => value == null ? '—' : Number(value).toFixed(2);
+const showLogin = () => { $('#authGate').classList.add('visible'); setTimeout(() => $('#loginPassword').focus(), 80); };
+const hideLogin = () => { $('#authGate').classList.remove('visible'); $('#loginPassword').value = ''; $('#loginHint').textContent = ''; };
 
 async function loadDashboard() {
   const data = await api('/api/dashboard');
@@ -53,6 +57,16 @@ async function reload() { try { await Promise.all([loadDashboard(), loadLogs()])
 
 $('#refreshBtn').addEventListener('click', reload);
 $('#addSiteBtn').addEventListener('click', () => { $('#siteForm').reset(); $('#siteHint').textContent = ''; $('#siteDialog').showModal(); });
+$('#logoutBtn').addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); authenticated = false; showLogin(); });
+$('#loginForm').addEventListener('submit', async (event) => {
+  event.preventDefault(); const hint = $('#loginHint'); hint.textContent = '正在登录…'; hint.classList.remove('error');
+  try {
+    const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: $('#loginUsername').value, password: $('#loginPassword').value }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || '登录失败');
+    authenticated = true; hideLogin(); toast('登录成功'); await reload();
+  } catch (error) { hint.textContent = error.message; hint.classList.add('error'); }
+});
 $('#exportBtn').addEventListener('click', async () => {
   try {
     const response = await fetch('/api/config/export');
@@ -105,8 +119,11 @@ $('#siteGrid').addEventListener('click', async (event) => {
   } catch (error) { toast(error.message, true); }
 });
 
-reload();
-setInterval(() => { loadDashboard().catch(() => {}); loadLogs().catch(() => {}); }, 60000);
+async function bootstrap() {
+  try { const status = await fetch('/api/auth/status').then((response) => response.json()); authenticated = status.authenticated === true; if (authenticated) await reload(); else showLogin(); } catch { showLogin(); }
+}
+bootstrap();
+setInterval(() => { if (authenticated) { loadDashboard().catch(() => {}); loadLogs().catch(() => {}); } }, 60000);
 
 document.querySelectorAll('.nav-item').forEach((link) => link.addEventListener('click', (event) => {
   const target = document.querySelector(link.getAttribute('href'));

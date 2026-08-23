@@ -11,6 +11,10 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       DATABASE_PATH: /data/charity-hub.db
       CREDENTIAL_KEY: ${CREDENTIAL_KEY:?请在 .env 中设置一个 32 字节以上的随机密钥}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 中设置至少 12 位的管理密码}
+      SESSION_SECRET: ${SESSION_SECRET:?请在 .env 中设置一个 32 字节以上的会话密钥}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       CHECKIN_ENABLED: ${CHECKIN_ENABLED:-true}
       CHECKIN_TIME: ${CHECKIN_TIME:-02:00}
       HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-20}

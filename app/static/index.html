@@ -23,7 +23,7 @@
       <main class="main">
         <header class="topbar">
           <div><p class="eyebrow">CONTROL CENTER / 01</p><h1>公益站总览</h1></div>
-          <div class="top-actions"><button class="btn ghost" id="refreshBtn">↻ 刷新</button><button class="btn ghost" id="exportBtn">↓ 导出配置</button><button class="btn ghost" id="importBtn">↑ 导入 JSON</button><button class="btn primary" id="addSiteBtn">＋ 添加站点</button></div>
+          <div class="top-actions"><button class="btn ghost" id="refreshBtn">↻ 刷新</button><button class="btn ghost" id="exportBtn">↓ 导出配置</button><button class="btn ghost" id="importBtn">↑ 导入 JSON</button><button class="btn ghost" id="logoutBtn">退出登录</button><button class="btn primary" id="addSiteBtn">＋ 添加站点</button></div>
         </header>
 
         <section class="hero-grid" id="dashboard">
@@ -51,6 +51,7 @@
     <dialog id="accountDialog"><form method="dialog" class="dialog-form" id="accountForm"><div class="dialog-head"><div><p class="eyebrow">ACCOUNT ACCESS</p><h2>添加账号</h2><p class="muted" id="accountSiteName"></p></div><button class="close" value="cancel">×</button></div><input type="hidden" name="site_id" /><label>用户名 / 邮箱<input name="username" placeholder="登录用户名（Token 模式也建议填写）" /></label><label>凭据类型<select name="credential_type" id="credentialType"><option value="token">Access Token</option><option value="cookie">Cookie / Session</option><option value="password">用户名 + 密码（登录换取 Token）</option></select></label><label id="credentialLabel">Access Token<textarea required name="credential" rows="4" placeholder="不会在页面回显，服务端加密保存"></textarea></label><label>New-API 用户 ID（可选）<input name="platform_user_id" type="number" min="1" placeholder="仅部分站点需要" /></label><label class="switch-row compact"><span><b>启用自动签到</b></span><input type="checkbox" name="checkin_enabled" checked /><i class="switch"></i></label><div class="dialog-actions"><button class="btn primary" value="default">保存账号</button></div><p class="form-hint" id="accountHint"></p></form></dialog>
     <dialog id="configDialog"><div class="dialog-form"><div class="dialog-head"><div><p class="eyebrow">BACKUP / RESTORE</p><h2>导入配置 JSON</h2><p class="muted">支持 Charity Hub 导出格式和 metapi 导出格式。当前文件只会预览，不会自动导入。</p></div><button class="close" id="closeConfigBtn">×</button></div><label>选择 JSON 文件<input type="file" id="configFile" accept="application/json,.json" /></label><div class="import-preview" id="importPreview">请选择文件后查看导入预览。</div><div class="dialog-actions"><button class="btn outline" id="previewImportBtn" disabled>解析预览</button><button class="btn primary" id="confirmImportBtn" disabled>确认导入</button></div><p class="form-hint" id="configHint"></p></div></dialog>
     <div class="toast" id="toast"></div>
+    <div class="auth-gate" id="authGate"><div class="login-card"><div class="login-logo">✦</div><p class="eyebrow">PRIVATE CONTROL CENTER</p><h2>欢迎回来</h2><p class="muted">登录后管理你的公益站与签到任务。</p><form id="loginForm"><label>用户名<input id="loginUsername" autocomplete="username" value="admin" required /></label><label>管理密码<input id="loginPassword" type="password" autocomplete="current-password" required /></label><button class="btn primary login-submit" type="submit">登录管理面板</button><p class="form-hint error" id="loginHint"></p></form><small class="login-security">会话有效期 7 天 · HttpOnly Cookie</small></div></div>
     <script src="/static/app.js"></script>
   </body>
 </html>
