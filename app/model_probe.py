@@ -29,7 +29,7 @@ FAMILIES: dict[str, str] = {
     "gemini": "Gemini",
 }
 # 非对话模型：图像、语音、向量等，不参与"最新版本"比较。
-NON_CHAT = re.compile(r"(image|imagen|embed|tts|audio|realtime|transcribe|whisper|dall-e|moderation|vision-preview|ocr|rerank)", re.I)
+NON_CHAT = re.compile(r"(image|imagen|embed|tts|audio|realtime|transcribe|whisper|dall-e|moderation|vision-preview|ocr|rerank|-img\b|-img-)", re.I)
 DATE_SUFFIX = re.compile(r"[-_@]?(20\d{2}-?\d{2}-?\d{2})")
 
 
@@ -72,6 +72,7 @@ class Provider:
     base_url: str
     api_keys: list[str]
     models: list[dict[str, str]] = field(default_factory=list)  # [{"name": upstream, "alias": exposed}]
+    disabled: bool = False
 
 
 def chat_url(base_url: str) -> str:
@@ -91,31 +92,34 @@ def cpa_configured() -> bool:
     return bool(CPA_BASE_URL and CPA_MANAGEMENT_KEY)
 
 
-async def load_providers() -> list[Provider]:
+async def fetch_cpa_list() -> list[dict[str, Any]]:
+    """读取 CPA 的 openai-compatibility 原始列表（v8 管理 API，失败时回退 v0）。"""
     if not cpa_configured():
         raise RuntimeError("未配置 CPA_BASE_URL / CPA_MANAGEMENT_KEY，无法读取公益站上游配置")
-    url = f"{CPA_BASE_URL}/v0/management/openai-compatibility"
+    headers = {"Authorization": f"Bearer {CPA_MANAGEMENT_KEY}"}
     async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.get(url, headers={"Authorization": f"Bearer {CPA_MANAGEMENT_KEY}"})
-    if response.status_code >= 400:
+        response = await client.get(f"{CPA_BASE_URL}/v8/management/config", headers=headers)
+        if response.status_code < 400:
+            return list(((response.json().get("api-keys") or {}).get("openai-compatibility")) or [])
+        legacy = await client.get(f"{CPA_BASE_URL}/v0/management/openai-compatibility", headers=headers)
+    if legacy.status_code >= 400:
         raise RuntimeError(f"读取 CPA 配置失败（HTTP {response.status_code}）：{response.text[:200]}")
-    payload = response.json()
+    payload = legacy.json()
     items = payload.get("openai-compatibility", payload) if isinstance(payload, dict) else payload
-    providers: list[Provider] = []
-    for item in items or []:
-        if not isinstance(item, dict) or not item.get("base-url"):
-            continue
-        keys: list[str] = []
-        for entry in item.get("api-key-entries") or []:
-            if isinstance(entry, dict) and entry.get("api-key"):
-                keys.append(str(entry["api-key"]))
-        keys += [str(k) for k in (item.get("api-keys") or []) if k]
-        models = []
-        for model in item.get("models") or []:
-            if isinstance(model, dict) and model.get("name"):
-                models.append({"name": str(model["name"]), "alias": str(model.get("alias") or model["name"])})
-        providers.append(Provider(name=str(item.get("name") or item["base-url"]), base_url=str(item["base-url"]), api_keys=keys, models=models))
-    return providers
+    # v0 用 api-key-entries，统一成 v8 的 keys
+    return [{**it, "keys": it.get("keys") or it.get("api-key-entries") or [{"api-key": k} for k in it.get("api-keys") or []]} for it in items or [] if isinstance(it, dict)]
+
+
+def to_provider(item: dict[str, Any]) -> Provider | None:
+    if not isinstance(item, dict) or not item.get("base-url"):
+        return None
+    keys = [str(e["api-key"]) for e in item.get("keys") or [] if isinstance(e, dict) and e.get("api-key")]
+    models = [{"name": str(m["name"]), "alias": str(m.get("alias") or m["name"])} for m in item.get("models") or [] if isinstance(m, dict) and m.get("name")]
+    return Provider(name=str(item.get("name") or item["base-url"]), base_url=str(item["base-url"]), api_keys=keys, models=models, disabled=bool(item.get("disabled")))
+
+
+async def load_providers() -> list[Provider]:
+    return [p for p in (to_provider(it) for it in await fetch_cpa_list()) if p]
 
 
 async def upstream_models(client: httpx.AsyncClient, provider: Provider) -> tuple[list[str], str | None]:
@@ -226,7 +230,7 @@ async def run_probe() -> dict[str, Any]:
             alias_by_name = {m["name"]: m["alias"] for m in provider.models}
             if error:
                 provider_errors.append({"provider": provider.name, "base_url": provider.base_url, "message": error})
-            names = listed or [m["name"] for m in provider.models]
+            names = listed + [m["name"] for m in provider.models]
             for name in dict.fromkeys(names):
                 candidates.append((provider, name, alias_by_name.get(name, name)))
 

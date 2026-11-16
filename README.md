@@ -45,6 +45,15 @@ docker compose -p charity-hub up -d --build
 
 配置：在 `.env` 中设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。CLIProxyAPI 需要已设置 `remote-management.secret-key`；如果 Charity Hub 访问 CPA 时不是从 localhost 发起，还需要开启 `allow-remote`。默认每 60 分钟探测一次，可在面板「模型可用性」中修改或立即探测。
 
+### 自动同步到 CPA
+
+每轮测活前后会自动维护 CLIProxyAPI 的 openai-compatibility 提供商（面板「CPA 自动同步」可暂停）：
+
+- **签到站自动接入**：启用中的签到站如果还不在 CPA 里，会用站点 access token 创建名为 `charity-hub-cpa` 的令牌，验证 `/v1/models` 可用后加入 CPA。旧版 access token 已失效、或 token 缺少 `api_key:read` 等权限的站点会在面板中标出原因。你手动从 CPA 删除的站点不会再被自动加回。
+- **更新对外模型**：探测可用、但 CPA 里还没有的最新模型会被加入，alias 统一为小写并去掉厂商前缀（例如 `z-ai/GLM-5.3-Flash` → `glm-5.3-flash`），方便多个站点负载均衡；连续失败 `CPA_SYNC_FAIL_THRESHOLD`（默认 3）次的模型会从对外列表移除，恢复后按原条目加回。
+- **停用/启用站点**：整体不可用（拿不到模型列表，且没有任何模型探测通过）连续达到阈值后设为 disabled，恢复后自动启用；你手动停用的站点不受影响。
+- **安全措施**：每次写入前加密备份原列表（保留 30 份，可在面板一键回滚，回滚后自动暂停同步）；一轮中超过 80% 的站点同时失败时视为探测侧故障，跳过本轮写入。
+
 命令行查询（需配置 `MODEL_STATUS_TOKEN`）：
 
 ```bash

@@ -31,15 +31,31 @@ $('#probeNowBtn').addEventListener('click', async () => {
   try {
     const result = await api('/api/models/probe', { method: 'POST' });
     toast(result.message, !result.ok);
-    for (let i = 0; i < 40; i += 1) { await new Promise((r) => setTimeout(r, 5000)); const data = await loadModels(); if (!data.running) break; }
+    for (let i = 0; i < 40; i += 1) { await new Promise((r) => setTimeout(r, 5000)); const data = await loadModels(); if (!data.running) { await loadCpaSync(); break; } }
   } catch (error) { toast(error.message, true); } finally { button.disabled = false; button.textContent = '◎ 立即探测'; }
 });
 $('#probeSaveBtn').addEventListener('click', async () => {
   try { await api('/api/models/settings', { method: 'PUT', body: JSON.stringify({ enabled: $('#probeEnabled').checked, interval_minutes: Number($('#probeInterval').value) || 60 }) }); toast('探测设置已保存'); } catch (error) { toast(error.message, true); }
 });
 
+const ACTION_TEXT = { add_provider: '接入站点', add_model: '加入模型', remove_model: '移除模型', disable_provider: '停用站点', enable_provider: '启用站点', rollback: '回滚', skip: '跳过', skip_site: '不再接入', error: '错误' };
+async function loadCpaSync() {
+  const data = await api('/api/cpa/sync');
+  $('#cpaSyncEnabled').checked = data.enabled;
+  $('#cpaSyncMeta').textContent = `测活后自动更新 CPA；连续失败 ${data.threshold} 次才移除模型或停用站点，恢复后自动加回`;
+  $('#cpaSites').innerHTML = data.sites.map((s) => { const ok = (s.cpa_status || '').startsWith('已接入') || (s.cpa_status || '').startsWith('已创建') || (s.cpa_status || '').startsWith('使用'); return `<div class="cpa-item ${ok ? 'ok' : s.cpa_status ? 'warn' : ''}"><b>${esc(s.name)}</b><span>${esc(s.cpa_status || '等待下一轮同步')}</span></div>`; }).join('') || '<div class="model-empty">没有启用的签到站</div>';
+  $('#cpaLogs').innerHTML = data.logs.map((l) => `<div class="cpa-item ${l.action === 'error' || l.action.startsWith('remove') || l.action.startsWith('disable') ? 'warn' : 'ok'}"><b>${fmtTime(l.created_at)} · ${esc(ACTION_TEXT[l.action] || l.action)} · ${esc(l.provider)}</b><span>${esc(l.detail)}</span></div>`).join('') || '<div class="model-empty">还没有变更</div>';
+  $('#cpaBackups').innerHTML = data.backups.map((b) => `<div class="cpa-item"><b>#${b.id} · ${fmtTime(b.created_at)}</b><span>${esc(b.reason)} <button data-backup="${b.id}">回滚到此前</button></span></div>`).join('') || '<div class="model-empty">还没有备份</div>';
+}
+$('#cpaSyncEnabled').addEventListener('change', async (event) => { try { await api('/api/cpa/sync/settings', { method: 'PUT', body: JSON.stringify({ enabled: event.target.checked }) }); toast(event.target.checked ? '已启用 CPA 自动同步' : '已暂停 CPA 自动同步'); } catch (error) { toast(error.message, true); } });
+$('#cpaBackups').addEventListener('click', async (event) => {
+  const id = event.target.closest('button')?.dataset.backup; if (!id || !confirm(`确认把 CPA 的提供商列表回滚到备份 #${id} 记录的状态吗？回滚后会暂停自动同步。`)) return;
+  try { await api(`/api/cpa/rollback/${id}`, { method: 'POST' }); toast('已回滚，自动同步已暂停'); await loadCpaSync(); } catch (error) { toast(error.message, true); }
+});
+
 // 登录后、手动刷新时 app.js 会调用 reload()，在其后顺带刷新模型面板。
 const baseReload = reload;
-reload = async () => { await baseReload(); loadModels().catch((error) => toast(error.message, true)); };
-if (modelsAuthed()) loadModels().catch((error) => toast(error.message, true));
-setInterval(() => { if (modelsAuthed()) loadModels().catch(() => {}); }, 60000);
+const loadModelPanels = () => Promise.all([loadModels(), loadCpaSync()]);
+reload = async () => { await baseReload(); loadModelPanels().catch((error) => toast(error.message, true)); };
+if (modelsAuthed()) loadModelPanels().catch((error) => toast(error.message, true));
+setInterval(() => { if (modelsAuthed()) loadModelPanels().catch(() => {}); }, 60000);

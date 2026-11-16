@@ -77,6 +77,29 @@ CREATE TABLE IF NOT EXISTS model_probe_results (
     UNIQUE(provider, model)
 );
 
+CREATE TABLE IF NOT EXISTS cpa_provider_state (
+    provider TEXT PRIMARY KEY,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    disabled_by_hub INTEGER NOT NULL DEFAULT 0,
+    removed_models TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cpa_sync_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cpa_backups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reason TEXT NOT NULL DEFAULT '',
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_accounts_site ON accounts(site_id);
 CREATE INDEX IF NOT EXISTS idx_logs_created ON checkin_logs(created_at DESC);
 """
@@ -107,6 +130,10 @@ def connection() -> Iterator[sqlite3.Connection]:
 def init_db() -> None:
     with connection() as conn:
         conn.executescript(SCHEMA)
+        site_columns = {row["name"] for row in conn.execute("PRAGMA table_info(sites)").fetchall()}
+        for column in ("cpa_key", "cpa_status", "cpa_synced_at"):
+            if column not in site_columns:
+                conn.execute(f"ALTER TABLE sites ADD COLUMN {column} TEXT")
         defaults = {
             "checkin_enabled": os.getenv("CHECKIN_ENABLED", "true").lower(),
             "checkin_time": os.getenv("CHECKIN_TIME", "02:00"),
@@ -118,6 +145,7 @@ def init_db() -> None:
             "model_probe_last_run": "",
             "model_probe_last_error": "",
             "model_probe_meta": "{}",
+            "cpa_sync_enabled": os.getenv("CPA_SYNC_ENABLED", "true").lower(),
         }
         for key, value in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 from .crypto import decrypt, encrypt, fingerprint
 from .db import connection, init_db, row_dict, rows_dict
 from .new_api import NewAPIAdapter, _looks_like_cookie, normalize_url
-from . import model_probe
+from . import cpa_sync, model_probe
 from .auth import COOKIE_NAME, ADMIN_USERNAME, check_password, clear_failed_logins, create_session, hash_password, login_allowed, record_failed_login, validate_runtime_config, verify_session
 
 
@@ -92,6 +92,10 @@ class ModelProbeSettingsIn(BaseModel):
     interval_minutes: int = Field(default=60, ge=10, le=1440)
 
 
+class CpaSyncSettingsIn(BaseModel):
+    enabled: bool
+
+
 class ConfigImportIn(BaseModel):
     data: dict[str, Any]
     mode: Literal["merge"] = "merge"
@@ -108,6 +112,7 @@ class ChangePasswordIn(BaseModel):
 
 
 def site_view(row: dict[str, Any]) -> dict[str, Any]:
+    row.pop("cpa_key", None)
     row["account_count"] = int(row.get("account_count") or 0)
     row["healthy_count"] = int(row.get("healthy_count") or 0)
     row["last_probe_ok"] = None if row.get("last_probe_ok") is None else bool(row["last_probe_ok"])
@@ -308,6 +313,12 @@ async def execute_model_probe() -> dict[str, Any]:
         return {"ok": False, "message": "探测正在进行中"}
     async with probe_lock:
         timestamp = now_iso()
+        sync_enabled = cpa_sync_enabled()
+        if sync_enabled:
+            try:
+                await cpa_sync.ensure_sites_in_cpa()
+            except Exception as exc:
+                cpa_sync.log("error", "*", f"签到站接入 CPA 失败：{exc}")
         try:
             report = await model_probe.run_probe()
         except Exception as exc:
@@ -332,8 +343,18 @@ async def execute_model_probe() -> dict[str, Any]:
             _set_setting(conn, "model_probe_meta", json.dumps(meta, ensure_ascii=False))
             _set_setting(conn, "model_probe_last_run", timestamp)
             _set_setting(conn, "model_probe_last_error", "")
+        if sync_enabled:
+            try:
+                await cpa_sync.apply_probe_results(report)
+            except Exception as exc:
+                cpa_sync.log("error", "*", f"测活后更新 CPA 失败：{exc}")
         ok_count = sum(item["status"] == "ok" for item in report["results"])
         return {"ok": True, "message": f"探测完成：{ok_count}/{len(report['results'])} 个模型可用", "total": len(report["results"]), "available": ok_count}
+
+
+def cpa_sync_enabled() -> bool:
+    with connection() as conn:
+        return _settings(conn, "cpa_sync_enabled").get("cpa_sync_enabled", "true") == "true"
 
 
 async def model_probe_loop() -> None:
@@ -500,7 +521,7 @@ async def create_site(payload: SiteIn) -> dict[str, Any]:
         except Exception as exc:
             raise HTTPException(409, f"站点地址已存在或保存失败：{exc}") from exc
         row = conn.execute("SELECT * FROM sites WHERE id = ?", (cursor.lastrowid,)).fetchone()
-    return row_dict(row) or {}
+    return site_view(row_dict(row) or {})
 
 
 @app.post("/api/sites/probe")
@@ -518,7 +539,7 @@ async def update_site(site_id: int, payload: SiteIn) -> dict[str, Any]:
         if result.rowcount == 0:
             raise HTTPException(404, "站点不存在")
         row = conn.execute("SELECT * FROM sites WHERE id = ?", (site_id,)).fetchone()
-    return row_dict(row) or {}
+    return site_view(row_dict(row) or {})
 
 
 @app.delete("/api/sites/{site_id}")
@@ -783,3 +804,30 @@ async def models_available() -> dict[str, Any]:
             for family in data["families"]
         },
     }
+
+
+@app.get("/api/cpa/sync")
+async def cpa_sync_status() -> dict[str, Any]:
+    with connection() as conn:
+        logs = rows_dict(conn.execute("SELECT action, provider, detail, created_at FROM cpa_sync_log ORDER BY id DESC LIMIT 40").fetchall())
+        backups = rows_dict(conn.execute("SELECT id, reason, created_at FROM cpa_backups ORDER BY id DESC LIMIT 10").fetchall())
+        sites = rows_dict(conn.execute("SELECT id, name, url, cpa_status, cpa_synced_at FROM sites WHERE status = 'active' ORDER BY id").fetchall())
+    return {"enabled": cpa_sync_enabled(), "threshold": cpa_sync.FAIL_THRESHOLD, "logs": logs, "backups": backups, "sites": sites}
+
+
+@app.put("/api/cpa/sync/settings")
+async def cpa_sync_settings(payload: CpaSyncSettingsIn) -> dict[str, Any]:
+    with connection() as conn:
+        _set_setting(conn, "cpa_sync_enabled", "true" if payload.enabled else "false")
+    return {"enabled": payload.enabled}
+
+
+@app.post("/api/cpa/rollback/{backup_id}")
+async def cpa_rollback(backup_id: int) -> dict[str, Any]:
+    if probe_lock.locked():
+        raise HTTPException(409, "探测进行中，请稍后再回滚")
+    try:
+        async with probe_lock:
+            return await cpa_sync.rollback(backup_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc

@@ -130,3 +130,15 @@ body {
 .chip.auth, .chip.unavailable, .chip.error { background: #f8e3df; color: var(--red); }
 .model-empty { color: var(--muted); font-size: 13px; }
 .model-alert { grid-column: 1 / -1; background: #fff7e6; border: 1px solid #f2dca5; color: #7a5b0d; border-radius: 14px; padding: 12px 16px; font-size: 13px; }
+
+/* ---- CPA 自动同步 ---- */
+.cpa-panel { margin-bottom: 30px; }
+.cpa-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; }
+.cpa-sub { font-size: 13px; margin: 6px 0 8px; color: var(--ink-soft); }
+.cpa-list { display: grid; gap: 6px; font-size: 12px; max-height: 360px; overflow: auto; margin-bottom: 14px; }
+.cpa-item { display: flex; justify-content: space-between; gap: 10px; padding: 7px 10px; border-radius: 10px; background: #f6f8f6; }
+.cpa-item b { font-weight: 600; white-space: nowrap; }
+.cpa-item span { color: var(--muted); text-align: right; }
+.cpa-item.ok span { color: var(--green-deep); }
+.cpa-item.warn span { color: var(--red); }
+.cpa-item button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 2px 8px; font-size: 12px; }

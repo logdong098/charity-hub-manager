@@ -42,6 +42,7 @@
 
         <section class="section-head" id="models"><div><p class="eyebrow">MODEL HEALTH</p><h2>最新模型可用性</h2><p class="muted tiny" id="modelMeta">—</p></div><div class="top-actions"><label class="model-setting">每 <input type="number" id="probeInterval" min="10" max="1440" step="10" /> 分钟 <input type="checkbox" id="probeEnabled" /> 自动</label><button class="btn ghost" id="probeSaveBtn">保存</button><button class="btn outline" id="probeNowBtn">◎ 立即探测</button></div></section>
         <section class="model-board" id="modelBoard"><div class="empty loading">正在加载模型状态…</div></section>
+        <section class="panel cpa-panel" id="cpaSync"><div class="panel-head"><div><p class="eyebrow">CPA SYNC</p><h2>CPA 自动同步</h2><p class="muted tiny" id="cpaSyncMeta">—</p></div><label class="model-setting"><input type="checkbox" id="cpaSyncEnabled" /> 启用自动同步</label></div><div class="cpa-grid"><div><h3 class="cpa-sub">签到站接入状态</h3><div id="cpaSites" class="cpa-list"></div></div><div><h3 class="cpa-sub">最近变更</h3><div id="cpaLogs" class="cpa-list"></div><h3 class="cpa-sub">备份（可回滚）</h3><div id="cpaBackups" class="cpa-list"></div></div></div></section>
 
         <section class="lower-grid" id="logs">
           <div class="panel"><div class="panel-head"><div><p class="eyebrow">ACTIVITY</p><h2>最近签到</h2></div><span class="live-dot">LIVE</span></div><div class="log-list" id="logList"></div></div>
