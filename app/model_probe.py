@@ -264,13 +264,15 @@ async def run_probe(probe_disabled: set[str] | None = None) -> dict[str, Any]:
         # 站点不可达的直接记为失败，不再逐个模型发请求
         unreachable = {e["provider"] for e in provider_errors if e["message"].startswith("站点不可达")}
         semaphore = asyncio.Semaphore(PROBE_CONCURRENCY)
+        # 同一站点串行探测：很多公益站限制单用户并发（例如最多 3 个请求），并发探测会造成误判
+        site_locks = {p.name: asyncio.Lock() for p in providers}
 
         async def guarded(provider: Provider, name: str, alias: str, family: str) -> dict[str, Any]:
             if provider.name in unreachable or not provider.api_keys:
                 error = next((e["message"] for e in provider_errors if e["provider"] == provider.name), "站点不可达")
                 outcome = {"status": "error", "http_status": None, "latency_ms": None, "message": error}
             else:
-                async with semaphore:
+                async with site_locks[provider.name], semaphore:
                     outcome = await probe_one(client, provider, name)
             return {"provider": provider.name, "base_url": provider.base_url, "model": name, "alias": alias,
                     "family": family, "version": ".".join(map(str, version_of(name))), **outcome}
