@@ -155,9 +155,9 @@ def _error_text(response: httpx.Response) -> str:
     text = response.text.strip()
     title = re.search(r"<title>\s*([^<]+?)\s*</title>", text, re.I)
     if title:
-        return f"HTTP {response.status_code}：{title.group(1)}"[:300]
+        return title.group(1)[:300]
     if text.startswith("<"):
-        return f"HTTP {response.status_code}（返回了 HTML 页面）"
+        return "返回了 HTML 页面"
     return text[:300] or f"HTTP {response.status_code}"
 
 
@@ -167,7 +167,7 @@ def classify(status_code: int | None, message: str) -> str:
         return "ok"
     if status_code == 429 or "rate limit" in text or "too many" in text or "限流" in text or "频率" in text:
         return "rate_limited"
-    if status_code in (401, 403) or "quota" in text or "余额" in text or "额度" in text or "invalid token" in text or "令牌" in text:
+    if status_code in (401, 402, 403) or "quota" in text or "配额" in text or "balance" in text or "充值" in text or "余额" in text or "额度" in text or "invalid token" in text or "令牌" in text:
         return "auth"
     if "渠道" in text or "channel" in text or "model_not_found" in text or "does not exist" in text or (status_code in (400, 404) and ("model" in text or "模型" in text)):
         return "unavailable"
