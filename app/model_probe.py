@@ -27,6 +27,7 @@ FAMILIES: dict[str, str] = {
     "gpt": "ChatGPT",
     "claude": "Claude",
     "gemini": "Gemini",
+    "other": "其他",
 }
 # 非对话模型：图像、语音、向量等，不参与"最新版本"比较。
 NON_CHAT = re.compile(r"(image|imagen|embed|tts|audio|realtime|transcribe|whisper|dall-e|moderation|vision-preview|ocr|rerank|-img\b|-img-)", re.I)
@@ -217,9 +218,17 @@ async def probe_one(client: httpx.AsyncClient, provider: Provider, model: str) -
     }
 
 
-async def run_probe() -> dict[str, Any]:
-    """完整探测一轮，返回 {targets, provider_errors, results}。"""
-    providers = await load_providers()
+def is_chat_model(model: str) -> bool:
+    return not NON_CHAT.search(model.lower().rsplit("/", 1)[-1])
+
+
+async def run_probe(probe_disabled: set[str] | None = None) -> dict[str, Any]:
+    """完整探测一轮，返回 {latest, provider_errors, results}。
+
+    探测范围：CPA 当前对外的全部对话模型 + 五个系列在上游新出现的最新版本模型。
+    已停用的提供商只在 probe_disabled 中时才探测（用于判断由系统停用的站点是否恢复）。
+    """
+    providers = [p for p in await load_providers() if not p.disabled or p.name in (probe_disabled or set())]
     async with httpx.AsyncClient(follow_redirects=True) as client:
         listings = await asyncio.gather(*(upstream_models(client, p) for p in providers))
 
@@ -241,11 +250,17 @@ async def run_probe() -> dict[str, Any]:
             if family and version and version > latest.get(family, ()):
                 latest[family] = version
 
-        targets = [
-            (p, name, alias, family_of(name))
-            for p, name, alias in candidates
-            if family_of(name) and version_of(name) == latest.get(family_of(name))
-        ]
+        targets: list[tuple[Provider, str, str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for p, name, alias in candidates:
+            exposed = any(m["name"] == name for m in p.models)
+            family = family_of(name)
+            is_latest = bool(family) and version_of(name) == latest.get(family)
+            # 对外模型全部探测（图像/向量等非对话模型无法用 chat 请求判断，跳过）；上游里只额外探测最新版本
+            if (exposed and is_chat_model(name)) or is_latest:
+                if (p.name, name) not in seen:
+                    seen.add((p.name, name))
+                    targets.append((p, name, alias, family or "other"))
         # 站点不可达的直接记为失败，不再逐个模型发请求
         unreachable = {e["provider"] for e in provider_errors if e["message"].startswith("站点不可达")}
         semaphore = asyncio.Semaphore(PROBE_CONCURRENCY)
@@ -258,7 +273,7 @@ async def run_probe() -> dict[str, Any]:
                 async with semaphore:
                     outcome = await probe_one(client, provider, name)
             return {"provider": provider.name, "base_url": provider.base_url, "model": name, "alias": alias,
-                    "family": family, "version": ".".join(map(str, latest[family])), **outcome}
+                    "family": family, "version": ".".join(map(str, version_of(name))), **outcome}
 
         results = await asyncio.gather(*(guarded(*t) for t in targets))
     return {

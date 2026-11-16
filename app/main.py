@@ -320,7 +320,9 @@ async def execute_model_probe() -> dict[str, Any]:
             except Exception as exc:
                 cpa_sync.log("error", "*", f"签到站接入 CPA 失败：{exc}")
         try:
-            report = await model_probe.run_probe()
+            with connection() as conn:
+                hub_disabled = {r["provider"] for r in conn.execute("SELECT provider FROM cpa_provider_state WHERE disabled_by_hub = 1").fetchall()}
+            report = await model_probe.run_probe(hub_disabled)
         except Exception as exc:
             with connection() as conn:
                 _set_setting(conn, "model_probe_last_run", timestamp)
@@ -377,6 +379,12 @@ async def model_probe_loop() -> None:
         await asyncio.sleep(60)
 
 
+def _version_sort_key(version: str) -> tuple[int, ...]:
+    """高版本在前：'6.1' 排在 '6' 前面，无版本号的排最后。"""
+    parts = [int(x) for x in (version or "").split(".") if x.isdigit()][:3]
+    return tuple(-x for x in parts + [-1] * (3 - len(parts))) if parts else (1, 1, 1)
+
+
 def model_status_payload() -> dict[str, Any]:
     with connection() as conn:
         rows = rows_dict(conn.execute("SELECT * FROM model_probe_results ORDER BY family, model, latency_ms IS NULL, latency_ms").fetchall())
@@ -394,7 +402,7 @@ def model_status_payload() -> dict[str, Any]:
             entry = models.setdefault(name.lower(), {"model": name, "providers": [], "available": 0})
             entry["providers"].append(row)
             entry["available"] += row["status"] == "ok"
-        families.append({"key": key, "label": label, "latest": meta.get("latest", {}).get(key), "models": sorted(models.values(), key=lambda m: (-m["available"], m["model"]))})
+        families.append({"key": key, "label": label, "latest": meta.get("latest", {}).get(key), "models": sorted(models.values(), key=lambda m: (_version_sort_key(m["providers"][0]["version"]), -m["available"], m["model"]))})
     return {
         "configured": model_probe.cpa_configured(),
         "running": probe_lock.locked(),
