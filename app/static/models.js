@@ -1,4 +1,6 @@
-// 最新模型可用性面板：依赖 app.js 中的 $ / api / esc / toast / fmtTime / authenticated。
+// 最新模型可用性面板：依赖 app.js 中的 $ / api / esc / toast / fmtTime / reload。
+// 门户模式（由统一门户负责登录）下 app.js 没有 authenticated 变量，视为已登录。
+const modelsAuthed = () => typeof authenticated === 'undefined' || authenticated;
 const STATUS_TEXT = { ok: '可用', rate_limited: '限流', auth: '鉴权/额度', unavailable: '无此模型', error: '失败' };
 
 async function loadModels() {
@@ -39,4 +41,5 @@ $('#probeSaveBtn').addEventListener('click', async () => {
 // 登录后、手动刷新时 app.js 会调用 reload()，在其后顺带刷新模型面板。
 const baseReload = reload;
 reload = async () => { await baseReload(); loadModels().catch((error) => toast(error.message, true)); };
-setInterval(() => { if (authenticated) loadModels().catch(() => {}); }, 60000);
+if (modelsAuthed()) loadModels().catch((error) => toast(error.message, true));
+setInterval(() => { if (modelsAuthed()) loadModels().catch(() => {}); }, 60000);
