@@ -53,11 +53,16 @@ def family_of(model: str) -> str | None:
 def version_of(model: str) -> tuple[int, ...]:
     """从模型名提取版本号：gpt-6.1-sol → (6,1)；claude-sonnet-4-6 → (4,6)；deepseek-v4.1 → (4,1)。"""
     name = DATE_SUFFIX.sub("", model.lower().rsplit("/", 1)[-1])
-    match = re.search(r"(?<![a-z0-9])v?(\d{1,2}(?:[.\-]\d{1,2})*)(?![0-9])", name)
+    # 版本号必须紧跟在系列名之后（Claude 允许中间夹 opus/sonnet/haiku），
+    # 避免把 deepseek-r1-0528-qwen3-8b 的 "8b"、glm-z1-9b 的 "9b" 这类参数量当成版本。
+    match = re.search(
+        r"(?:deepseek|glm|gpt|gemini|claude(?:-(?:opus|sonnet|haiku))?)[-_ ]?v?"
+        r"(\d{1,2}(?:\.\d{1,2})?(?:-\d{1,2})?)(?![0-9.]|b\b|b-|k\b)",
+        name,
+    )
     if not match:
         return ()
     parts = re.split(r"[.\-]", match.group(1))
-    # claude-3-5-sonnet-20241022 之类：最多取两段，避免把尾部数字当成版本
     return tuple(int(p) for p in parts[:2])
 
 
@@ -147,7 +152,13 @@ def _error_text(response: httpx.Response) -> str:
             return str(payload["message"])[:300]
     except ValueError:
         pass
-    return response.text.strip()[:300] or f"HTTP {response.status_code}"
+    text = response.text.strip()
+    title = re.search(r"<title>\s*([^<]+?)\s*</title>", text, re.I)
+    if title:
+        return f"HTTP {response.status_code}：{title.group(1)}"[:300]
+    if text.startswith("<"):
+        return f"HTTP {response.status_code}（返回了 HTML 页面）"
+    return text[:300] or f"HTTP {response.status_code}"
 
 
 def classify(status_code: int | None, message: str) -> str:
