@@ -59,6 +59,24 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS model_probe_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    model TEXT NOT NULL,
+    alias TEXT NOT NULL DEFAULT '',
+    family TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    http_status INTEGER,
+    latency_ms INTEGER,
+    message TEXT NOT NULL DEFAULT '',
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    last_ok_at TEXT,
+    checked_at TEXT NOT NULL,
+    UNIQUE(provider, model)
+);
+
 CREATE INDEX IF NOT EXISTS idx_accounts_site ON accounts(site_id);
 CREATE INDEX IF NOT EXISTS idx_logs_created ON checkin_logs(created_at DESC);
 """
@@ -95,6 +113,11 @@ def init_db() -> None:
             "last_scheduler_run": "",
             "last_scheduler_day": "",
             "admin_password_hash": "",
+            "model_probe_enabled": os.getenv("MODEL_PROBE_ENABLED", "true").lower(),
+            "model_probe_interval": os.getenv("MODEL_PROBE_INTERVAL_MINUTES", "60"),
+            "model_probe_last_run": "",
+            "model_probe_last_error": "",
+            "model_probe_meta": "{}",
         }
         for key, value in defaults.items():
             conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))

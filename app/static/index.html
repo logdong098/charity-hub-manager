@@ -14,6 +14,7 @@
         <p class="tagline">公益站统一管理台</p>
         <nav>
           <a class="nav-item active" href="#dashboard"><span>▦</span>站点总览</a>
+          <a class="nav-item" href="#models"><span>◎</span>模型可用性</a>
           <a class="nav-item" href="#logs"><span>◷</span>签到记录</a>
           <a class="nav-item" href="#settings"><span>⚙</span>自动化设置</a>
         </nav>
@@ -39,6 +40,9 @@
         <section class="section-head"><div><p class="eyebrow">YOUR NETWORK</p><h2>站点与账号</h2></div><button class="btn outline" id="checkinAllBtn">⚡ 立即签到全部</button></section>
         <section class="site-grid" id="siteGrid"><div class="empty loading">正在加载站点…</div></section>
 
+        <section class="section-head" id="models"><div><p class="eyebrow">MODEL HEALTH</p><h2>最新模型可用性</h2><p class="muted tiny" id="modelMeta">—</p></div><div class="top-actions"><label class="model-setting">每 <input type="number" id="probeInterval" min="10" max="1440" step="10" /> 分钟 <input type="checkbox" id="probeEnabled" /> 自动</label><button class="btn ghost" id="probeSaveBtn">保存</button><button class="btn outline" id="probeNowBtn">◎ 立即探测</button></div></section>
+        <section class="model-board" id="modelBoard"><div class="empty loading">正在加载模型状态…</div></section>
+
         <section class="lower-grid" id="logs">
           <div class="panel"><div class="panel-head"><div><p class="eyebrow">ACTIVITY</p><h2>最近签到</h2></div><span class="live-dot">LIVE</span></div><div class="log-list" id="logList"></div></div>
           <div class="panel" id="settings"><div class="panel-head"><div><p class="eyebrow">AUTOMATION</p><h2>自动化设置</h2></div><span class="schedule-state" id="scheduleState">—</span></div><form id="scheduleForm" class="schedule-form"><label class="switch-row"><span><b>启用自动签到</b><small>每天在设定时间执行一次</small></span><input type="checkbox" id="scheduleEnabled" /><i class="switch"></i></label><label>每日签到时间<input type="time" id="scheduleTime" required /></label><button class="btn primary" type="submit">保存设置</button><p class="muted tiny">默认凌晨 2:00，按 Docker Compose 中的 TZ 配置执行。</p></form></div>
@@ -53,5 +57,6 @@
     <div class="toast" id="toast"></div>
     <div class="auth-gate" id="authGate"><div class="login-card" id="loginCard"><div class="login-logo">✦</div><p class="eyebrow">PRIVATE CONTROL CENTER</p><h2>欢迎回来</h2><p class="muted">登录后管理你的公益站与签到任务。</p><form id="loginForm"><label>用户名<input id="loginUsername" autocomplete="username" value="admin" required /></label><label>管理密码<input id="loginPassword" type="password" autocomplete="current-password" required /></label><button class="btn primary login-submit" type="submit">登录管理面板</button><p class="form-hint error" id="loginHint"></p></form><small class="login-security">会话有效期 7 天 · HttpOnly Cookie</small></div><div class="login-card password-change-card" id="passwordChangeCard"><div class="login-logo">✓</div><p class="eyebrow">SECURITY REQUIRED</p><h2>请修改初始密码</h2><p class="muted">首次登录必须设置新密码，至少 12 位。</p><form id="changePasswordForm"><label>当前密码<input id="currentPassword" type="password" autocomplete="current-password" required /></label><label>新密码<input id="newPassword" type="password" autocomplete="new-password" minlength="12" required /></label><label>确认新密码<input id="confirmPassword" type="password" autocomplete="new-password" minlength="12" required /></label><button class="btn primary login-submit" type="submit">保存新密码</button><p class="form-hint error" id="changePasswordHint"></p></form><small class="login-security">修改成功后才能进入管理面板</small></div></div>
     <script src="/static/app.js"></script>
+    <script src="/static/models.js"></script>
   </body>
 </html>

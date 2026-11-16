@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 from contextlib import asynccontextmanager
@@ -17,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 from .crypto import decrypt, encrypt, fingerprint
 from .db import connection, init_db, row_dict, rows_dict
 from .new_api import NewAPIAdapter, _looks_like_cookie, normalize_url
+from . import model_probe
 from .auth import COOKIE_NAME, ADMIN_USERNAME, check_password, clear_failed_logins, create_session, hash_password, login_allowed, record_failed_login, validate_runtime_config, verify_session
 
 
@@ -24,6 +26,10 @@ ROOT = os.path.dirname(__file__)
 adapter = NewAPIAdapter()
 checkin_lock = asyncio.Lock()
 scheduler_task: asyncio.Task[None] | None = None
+probe_task: asyncio.Task[None] | None = None
+probe_lock = asyncio.Lock()
+background_tasks: set[asyncio.Task[Any]] = set()
+MODEL_STATUS_TOKEN = os.getenv("MODEL_STATUS_TOKEN", "")
 
 
 def now_iso() -> str:
@@ -79,6 +85,11 @@ class ScheduleIn(BaseModel):
         except ValueError as exc:
             raise ValueError("签到时间必须是 HH:MM 格式") from exc
         return parsed.strftime("%H:%M")
+
+
+class ModelProbeSettingsIn(BaseModel):
+    enabled: bool
+    interval_minutes: int = Field(default=60, ge=10, le=1440)
 
 
 class ConfigImportIn(BaseModel):
@@ -282,19 +293,115 @@ async def scheduler_loop() -> None:
         await asyncio.sleep(60)
 
 
+def _settings(conn: Any, *keys: str) -> dict[str, str]:
+    marks = ",".join("?" for _ in keys)
+    return {row["key"]: row["value"] for row in conn.execute(f"SELECT key, value FROM settings WHERE key IN ({marks})", keys).fetchall()}
+
+
+def _set_setting(conn: Any, key: str, value: str) -> None:
+    conn.execute("INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+
+async def execute_model_probe() -> dict[str, Any]:
+    """跑一轮最新模型探活并落库；同一时间只允许一轮。"""
+    if probe_lock.locked():
+        return {"ok": False, "message": "探测正在进行中"}
+    async with probe_lock:
+        timestamp = now_iso()
+        try:
+            report = await model_probe.run_probe()
+        except Exception as exc:
+            with connection() as conn:
+                _set_setting(conn, "model_probe_last_run", timestamp)
+                _set_setting(conn, "model_probe_last_error", str(exc)[:500])
+            print(f"[model-probe] error={exc}")
+            return {"ok": False, "message": str(exc)}
+        with connection() as conn:
+            previous = {(r["provider"], r["model"]): dict(r) for r in conn.execute("SELECT provider, model, consecutive_failures, last_ok_at FROM model_probe_results").fetchall()}
+            conn.execute("DELETE FROM model_probe_results")
+            for item in report["results"]:
+                old = previous.get((item["provider"], item["model"]), {})
+                ok = item["status"] == "ok"
+                conn.execute(
+                    """INSERT INTO model_probe_results(provider, base_url, model, alias, family, version, status, http_status, latency_ms, message, consecutive_failures, last_ok_at, checked_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (item["provider"], item["base_url"], item["model"], item["alias"], item["family"], item["version"], item["status"], item["http_status"],
+                     item["latency_ms"], item["message"], 0 if ok else int(old.get("consecutive_failures") or 0) + 1, timestamp if ok else old.get("last_ok_at"), timestamp),
+                )
+            meta = {"latest": report["latest"], "provider_count": report["provider_count"], "provider_errors": report["provider_errors"]}
+            _set_setting(conn, "model_probe_meta", json.dumps(meta, ensure_ascii=False))
+            _set_setting(conn, "model_probe_last_run", timestamp)
+            _set_setting(conn, "model_probe_last_error", "")
+        ok_count = sum(item["status"] == "ok" for item in report["results"])
+        return {"ok": True, "message": f"探测完成：{ok_count}/{len(report['results'])} 个模型可用", "total": len(report["results"]), "available": ok_count}
+
+
+async def model_probe_loop() -> None:
+    await asyncio.sleep(15)
+    while True:
+        try:
+            with connection() as conn:
+                values = _settings(conn, "model_probe_enabled", "model_probe_interval", "model_probe_last_run")
+            enabled = values.get("model_probe_enabled", "true") == "true"
+            interval = max(10, int(values.get("model_probe_interval") or 60))
+            last_run = values.get("model_probe_last_run") or ""
+            due = True
+            if last_run:
+                elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last_run)).total_seconds()
+                due = elapsed >= interval * 60
+            if enabled and due and model_probe.cpa_configured():
+                await execute_model_probe()
+        except Exception as exc:
+            print(f"[model-probe] scheduler error={exc}")
+        await asyncio.sleep(60)
+
+
+def model_status_payload() -> dict[str, Any]:
+    with connection() as conn:
+        rows = rows_dict(conn.execute("SELECT * FROM model_probe_results ORDER BY family, model, latency_ms IS NULL, latency_ms").fetchall())
+        values = _settings(conn, "model_probe_enabled", "model_probe_interval", "model_probe_last_run", "model_probe_last_error", "model_probe_meta")
+    try:
+        meta = json.loads(values.get("model_probe_meta") or "{}")
+    except json.JSONDecodeError:
+        meta = {}
+    families = []
+    for key, label in model_probe.FAMILIES.items():
+        items = [row for row in rows if row["family"] == key]
+        models: dict[str, dict[str, Any]] = {}
+        for row in items:
+            name = row["model"].rsplit("/", 1)[-1]  # openai/gpt-6.1-sol 与 gpt-6.1-sol 视为同一模型
+            entry = models.setdefault(name.lower(), {"model": name, "providers": [], "available": 0})
+            entry["providers"].append(row)
+            entry["available"] += row["status"] == "ok"
+        families.append({"key": key, "label": label, "latest": meta.get("latest", {}).get(key), "models": sorted(models.values(), key=lambda m: (-m["available"], m["model"]))})
+    return {
+        "configured": model_probe.cpa_configured(),
+        "running": probe_lock.locked(),
+        "enabled": values.get("model_probe_enabled", "true") == "true",
+        "interval_minutes": int(values.get("model_probe_interval") or 60),
+        "last_run": values.get("model_probe_last_run") or None,
+        "last_error": values.get("model_probe_last_error") or None,
+        "provider_count": meta.get("provider_count"),
+        "provider_errors": meta.get("provider_errors", []),
+        "families": families,
+    }
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    global scheduler_task
+    global scheduler_task, probe_task
     validate_runtime_config()
     init_db()
     scheduler_task = asyncio.create_task(scheduler_loop())
+    probe_task = asyncio.create_task(model_probe_loop())
     yield
-    if scheduler_task:
-        scheduler_task.cancel()
-        try:
-            await scheduler_task
-        except asyncio.CancelledError:
-            pass
+    for task in (scheduler_task, probe_task):
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(title="Charity Hub", version="1.0.0", lifespan=lifespan)
@@ -306,6 +413,8 @@ async def protect_management_api(request: Request, call_next):
     path = request.url.path
     public_api = {"/api/health", "/api/auth/login", "/api/auth/status", "/api/auth/logout"}
     authenticated = verify_session(request.cookies.get(COOKIE_NAME))
+    if path == "/api/models/available" and MODEL_STATUS_TOKEN and hmac.compare_digest(request.headers.get("Authorization", "").encode("utf-8", "ignore"), f"Bearer {MODEL_STATUS_TOKEN}".encode()):
+        return await call_next(request)
     if path.startswith("/api/") and path not in public_api and not authenticated:
         return JSONResponse(status_code=401, content={"detail": "请先登录管理面板"})
     if path.startswith("/api/") and authenticated and not stored_admin_password_hash() and path not in {"/api/auth/change-password", "/api/auth/logout", "/api/auth/status"}:
@@ -633,3 +742,44 @@ async def set_schedule(payload: ScheduleIn) -> dict[str, Any]:
         conn.execute("INSERT INTO settings(key, value) VALUES('checkin_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", ("true" if payload.enabled else "false",))
         conn.execute("INSERT INTO settings(key, value) VALUES('checkin_time', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (payload.checkin_time,))
     return {"enabled": payload.enabled, "checkin_time": payload.checkin_time}
+
+
+@app.get("/api/models/status")
+async def models_status() -> dict[str, Any]:
+    return model_status_payload()
+
+
+@app.post("/api/models/probe")
+async def models_probe() -> dict[str, Any]:
+    if not model_probe.cpa_configured():
+        raise HTTPException(422, "请先在 .env 中配置 CPA_BASE_URL 和 CPA_MANAGEMENT_KEY")
+    if probe_lock.locked():
+        return {"ok": False, "message": "探测正在进行中"}
+    task = asyncio.create_task(execute_model_probe())
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+    return {"ok": True, "message": "已开始探测，通常需要 1 分钟左右"}
+
+
+@app.put("/api/models/settings")
+async def models_settings(payload: ModelProbeSettingsIn) -> dict[str, Any]:
+    with connection() as conn:
+        _set_setting(conn, "model_probe_enabled", "true" if payload.enabled else "false")
+        _set_setting(conn, "model_probe_interval", str(payload.interval_minutes))
+    return {"enabled": payload.enabled, "interval_minutes": payload.interval_minutes}
+
+
+@app.get("/api/models/available")
+async def models_available() -> dict[str, Any]:
+    """精简结果：每个系列当前可用的最新模型，以及可用站点数，适合命令行查询。"""
+    data = model_status_payload()
+    return {
+        "last_run": data["last_run"],
+        "families": {
+            family["label"]: [
+                {"model": m["model"], "available_sites": m["available"], "sites": [p["provider"] for p in m["providers"] if p["status"] == "ok"]}
+                for m in family["models"] if m["available"]
+            ]
+            for family in data["families"]
+        },
+    }

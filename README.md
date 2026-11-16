@@ -34,6 +34,23 @@ docker compose -p charity-hub up -d --build
 - 管理面板登录保护：HttpOnly 会话 Cookie、7 天会话有效期、失败登录限流。
 - Token/Cookie 使用 Fernet 加密后写入 SQLite，API 列表不会返回凭据原文。
 
+## 最新模型探活
+
+只探测 DeepSeek、GLM、ChatGPT（gpt-*）、Claude、Gemini 五个系列的**最新版本**，不会把公益站的所有模型都测一遍：
+
+1. 通过 CLIProxyAPI 管理 API（`GET /v0/management/openai-compatibility`）读取每个公益站的 base-url、api-key 和模型；
+2. 请求各站点 `/v1/models` 获取真实模型列表（失败时退回 CPA 中配置的模型），并忽略图像、语音、向量等非对话模型；
+3. 每个系列在所有站点中取最高版本号（如 `gpt-6.1-*`、`glm-5.3*`），只对这些模型发一次 `max_tokens=16` 的请求；
+4. 结果分为：可用、限流、鉴权/额度、无此模型、失败；并记录延迟、连续失败次数和最近一次可用的时间。
+
+配置：在 `.env` 中设置 `CPA_BASE_URL` 和 `CPA_MANAGEMENT_KEY`。CLIProxyAPI 需要已设置 `remote-management.secret-key`；如果 Charity Hub 访问 CPA 时不是从 localhost 发起，还需要开启 `allow-remote`。默认每 60 分钟探测一次，可在面板「模型可用性」中修改或立即探测。
+
+命令行查询（需配置 `MODEL_STATUS_TOKEN`）：
+
+```bash
+curl -s -H "Authorization: Bearer $MODEL_STATUS_TOKEN" https://<你的域名>/api/models/available
+```
+
 ## 注意事项
 
 这是一个单用户、自托管管理台。请不要直接暴露到公网，建议通过 Nginx/Caddy 配置 HTTPS，并将 `COOKIE_SECURE=true`；同时只开放 80/443 和 SSH 端口。
